@@ -14,7 +14,17 @@
 #include <qicon.h>
 # pragma execution_character_set("utf-8")
 QStringList Mon = { "Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sept","Oct","Nov","Dec"};
-QStringList Week = { "Mon","Tue","Wed","Thur","Fri","Sat","Sun"};
+QStringList Week = { "Sun","Mon","Tue","Wed","Thur","Fri","Sat"};
+template <class T>
+T Range(T n,T tmin, T tmax)
+{
+    if (n < tmin)
+        return tmin;
+    else if (n > tmax)
+        return tmax;
+    else 
+        return n;
+}
 KUSBLFTOASC::KUSBLFTOASC(QWidget *parent)
     : QWidget(parent)
 {
@@ -28,7 +38,7 @@ KUSBLFTOASC::KUSBLFTOASC(QWidget *parent)
         this->setStyleSheet(f.readAll());
     }
     this->setWindowIcon(QIcon(":/qrc/logo.ico"));
-    this->setWindowTitle("KUS BLF转ASC工具");
+    this->setWindowTitle("KUS BLF转ASC工具 V1.01.08");
     //connect(this, &KUSBLFTOASC::sigStatus, this, &KUSBLFTOASC::on_recConveterState);
 }
 
@@ -62,6 +72,7 @@ void KUSBLFTOASC::runConveter()
         VBLObjectHeaderBase base;
         VBLCANMessage message;
         VBLCANMessage2_t message2;
+        VBLCANErrorFrameExt erromessage;
         VBLEnvironmentVariable variable;
         VBLEthernetFrame ethframe;
         VBLAppText appText;
@@ -99,18 +110,99 @@ void KUSBLFTOASC::runConveter()
             return;
         }
         QTextStream filestream(&file);
-        QString data = "date " + Mon.at(statistics.mMeasurementStartTime.wMonth) + " "
-            + Week.at(statistics.mMeasurementStartTime.wDayOfWeek)
+        /*QString data = "date " + Mon.at(statistics.mMeasurementStartTime.wDayOfWeek-1) + " "
+            + Week.at(statistics.mMeasurementStartTime.wMonth-1)
             + " " + QString::number(statistics.mMeasurementStartTime.wDay)
             + " " + QString::number(statistics.mMeasurementStartTime.wHour)
             + ":" + QString::number(statistics.mMeasurementStartTime.wMinute)
             + ":" + QString::number(statistics.mMeasurementStartTime.wSecond)
-            + "." + QString::number(statistics.mMeasurementStartTime.wMilliseconds) + "\nbase hex  timestamps absolute\ninternal events logged\n// version N/A\n";
+            + "." + QString::number(statistics.mMeasurementStartTime.wMilliseconds)
+            + "  " + QString::number(statistics.mMeasurementStartTime.wYear) + "\nbase hex  timestamps absolute\ninternal events logged\n// version N/A\n";*/
 
+        QString data = "date " + Mon.at(Range(statistics.mMeasurementStartTime.wMonth-1,0,11)) + " "
+            + QString::number(statistics.mMeasurementStartTime.wDay) + " "
+            + Week.at(Range((int)statistics.mMeasurementStartTime.wDayOfWeek,0,6))
+            + " " + QString::number(statistics.mMeasurementStartTime.wHour)
+            + ":" + QString::number(statistics.mMeasurementStartTime.wMinute)
+            + ":" + QString::number(statistics.mMeasurementStartTime.wSecond)
+            + "." + QString::number(statistics.mMeasurementStartTime.wMilliseconds)
+            + "  " + QString::number(statistics.mMeasurementStartTime.wYear) + "\nbase hex  timestamps absolute\ninternal events logged\n// version N/A\n";
         filestream << data;
         /* read base object header from file */
         while (RunState&&bSuccess && BLPeekObject(hFile, &base))
         {
+
+            {
+                message2.mHeader.mBase = base;
+                bSuccess = BLReadObjectSecure(hFile, &message2.mHeader.mBase, sizeof(message2));
+                /* free memory for the CAN message */
+                if (!message2.mDLC)
+                    continue;
+                if (bSuccess) {
+                    UINT64 id;
+                    //CANoe的人在扩展帧ID上加了0x80000000的，所以要处理一下
+                    if(message2.mID> 0x80000000)
+                        id = message2.mID & 0x7FFFFFFF;
+                    else
+                        id = message2.mID;
+                    /*printf("%ld 0x%x %2x %2x %2x %2x %2x %2x %2x %2x\n", message.mHeader.mObjectTimeStamp, (message.mID - 0x7FFFFFFF), message.mData[0],
+                        message.mData[1], message.mData[2], message.mData[3], message.mData[4], message.mData[5], message.mData[6], message.mData[7]);*/
+                    QString dir = CAN_MSG_DIR(message2.mFlags) == 0 ? "\tRx" : "\tTx";
+
+                    QString str = QString("%1 %2  %3 %4 %5 %6 %7 %8 %9 %10 %11 %12 %13 %14 %15")
+                        .arg(QString::number(message2.mHeader.mObjectTimeStamp / 1000000000.0, 'f', 6))
+                        .arg(QString::number(message2.mChannel))
+                        .arg("0x" + QString::number(id, 16).toUpper())
+                        .arg(dir)
+                        .arg("d")
+                        .arg(QString::number(message2.mDLC))
+                        .arg(QString::number(message2.mData[0], 16).toUpper(), 2, QLatin1Char('0'))
+                        .arg(QString::number(message2.mData[1], 16).toUpper(), 2, QLatin1Char('0'))
+                        .arg(QString::number(message2.mData[2], 16).toUpper(), 2, QLatin1Char('0'))
+                        .arg(QString::number(message2.mData[3], 16).toUpper(), 2, QLatin1Char('0'))
+                        .arg(QString::number(message2.mData[4], 16).toUpper(), 2, QLatin1Char('0'))
+                        .arg(QString::number(message2.mData[5], 16).toUpper(), 2, QLatin1Char('0'))
+                        .arg(QString::number(message2.mData[6], 16).toUpper(), 2, QLatin1Char('0'))
+                        .arg(QString::number(message2.mData[7], 16).toUpper(), 2, QLatin1Char('0'))
+                        /*.arg("Length = "+QString::number(message2.mFrameLength))
+                        .arg("BitCount = "+QString::number(message2.mBitCount))*/
+                        .arg("ID = " + QString::number(id) + "x") + "\n";
+                    if (isFilter)
+                    {
+                        if (fifter.size() > 0)
+                        {
+                            for (int i = 0; i < fifter.size(); i++)
+                            {
+                                if (QString::number(id, 16).toUpper() == fifter.at(i).toUpper())
+                                {
+                                    filestream << str;
+                                }
+                            }
+                        }
+                    }
+                    else
+                    {
+                        filestream << str;
+                    }
+
+                    BLFreeObject(hFile, &message2.mHeader.mBase);
+                }
+            }
+            if (bSuccess)
+            {
+                *pRead += 1;
+            }
+            ++sta;
+            if (sta % 100 == 0 || (sta / 100) >= n)
+                emit sigStatus(++mn);
+            if (!RunState)
+            {
+                filestream.flush();
+                file.close();
+                return;
+            }
+            continue;
+
             switch (base.mObjectType)
             {
             case BL_OBJ_TYPE_CAN_MESSAGE:
@@ -196,6 +288,12 @@ void KUSBLFTOASC::runConveter()
                 if (bSuccess) {
                     BLFreeObject(hFile, &appText.mHeader.mBase);
                 }
+                break;
+            case BL_OBJ_TYPE_UNKNOWN:
+                break;
+            case BL_OBJ_TYPE_CAN_ERROR:
+            case BL_OBJ_TYPE_CAN_ERROR_EXT:
+                erromessage.mHeader.mBase = base;
                 break;
             default:
                 /* skip all other objects */
