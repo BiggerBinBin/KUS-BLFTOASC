@@ -15,6 +15,37 @@
 # pragma execution_character_set("utf-8")
 QStringList Mon = { "Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sept","Oct","Nov","Dec"};
 QStringList Week = { "Sun","Mon","Tue","Wed","Thur","Fri","Sat"};
+QMap<uint, QString>DriverErrCode{
+    {0,"timeout during board initialization"},
+    {1,"no events in the rx queue / no event available for dvGetEvent"},
+    {2,"tx queue full, tx request refused"},
+    {3,"unknown Controller-Nr."},
+    {4,"timeout during command"},
+    {5,"DPRAM-Overflow"},
+    {6,"not allowed event in dvPutCommand"},
+    {8,"driver detected another hardware"},
+    {9,"parameter error in dvMeasureInit"},
+    {10,"parameter error in dvMeasureInit and dvPutCommand"},
+    {11,"not (yet) implemented function in this version of driver"},
+    {12,"82526: no access to imp"},
+    {14,"last msg wasn't transferred"},
+    {100,"unknown send id (FullCAN only)"},
+    {101,"rx queue overrun"},
+    {102,"chip state busoff"},
+    {103,"chip state error passive"},
+    {104,"chip state error active"},
+    {105,"rx register overrrun (BasicCan only)"},
+    {106,"at bootup the firmware couldn't access the controller"},
+    {107,"no valid dpram address in dvBoardInit"},
+    {108,"no interrupt from CANIB received"},
+    {109,"wrong modulnumber"},
+    {110,"wrong pointer to source buffer"},
+    {111,"address > CANIB_SRAM_SIZE"},
+    {112,"address + size > CANIB_SRAM_SIZE"},
+    {113,"CAN-Nr. <> 0 && CAN-Nr. <> 1"},
+    {114,"FIFO-Entry > 16 Byte"},
+    {115,"see drvspec"},
+};
 template <class T>
 T Range(T n,T tmin, T tmax)
 {
@@ -38,7 +69,7 @@ KUSBLFTOASC::KUSBLFTOASC(QWidget *parent)
         this->setStyleSheet(f.readAll());
     }
     this->setWindowIcon(QIcon(":/qrc/logo.ico"));
-    this->setWindowTitle("KUS BLF转ASC工具 V1.01.08");
+    this->setWindowTitle("KUS BLF转ASC工具 V2.24.01.15");
     //connect(this, &KUSBLFTOASC::sigStatus, this, &KUSBLFTOASC::on_recConveterState);
 }
 
@@ -55,9 +86,7 @@ void KUSBLFTOASC::on_pushButton_sleBlf_clicked()
 
 void KUSBLFTOASC::runConveter()
 {
-    //int read_test(LPCTSTR pFileName, LPDWORD pRead)
-    //LPCSTR pFileName =("./b_2_15_81.blf");
-    //LPCSTR pFileName = (m_sBlfName.toLocal8Bit().toStdString().c_str());
+  
     QByteArray dd = m_sBlfName.toLocal8Bit();
     LPCSTR pFileName = dd.data();
     DWORD dwWritten;
@@ -70,9 +99,11 @@ void KUSBLFTOASC::runConveter()
     {
         HANDLE hFile;
         VBLObjectHeaderBase base;
-        VBLCANMessage message;
+        //VBLCANMessage message;
         VBLCANMessage2_t message2;
-        VBLCANErrorFrameExt erromessage;
+        VBLCANDriverErrorExt_t erromessage;
+        VBLCANErrorFrameExt errofreammessage;
+        VBLCANDriverStatistic statistic;
         VBLEnvironmentVariable variable;
         VBLEthernetFrame ethframe;
         VBLAppText appText;
@@ -129,64 +160,134 @@ void KUSBLFTOASC::runConveter()
             + "  " + QString::number(statistics.mMeasurementStartTime.wYear) + "\nbase hex  timestamps absolute\ninternal events logged\n// version N/A\n";
         filestream << data;
         /* read base object header from file */
-        while (RunState&&bSuccess && BLPeekObject(hFile, &base))
+        while (RunState&& BLPeekObject(hFile, &base))
         {
-
+            switch (base.mObjectType)
             {
-                message2.mHeader.mBase = base;
-                bSuccess = BLReadObjectSecure(hFile, &message2.mHeader.mBase, sizeof(message2));
-                /* free memory for the CAN message */
-                if (!message2.mDLC)
-                    continue;
-                if (bSuccess) {
-                    UINT64 id;
-                    //CANoe的人在扩展帧ID上加了0x80000000的，所以要处理一下
-                    if(message2.mID> 0x80000000)
-                        id = message2.mID & 0x7FFFFFFF;
-                    else
-                        id = message2.mID;
-                    /*printf("%ld 0x%x %2x %2x %2x %2x %2x %2x %2x %2x\n", message.mHeader.mObjectTimeStamp, (message.mID - 0x7FFFFFFF), message.mData[0],
-                        message.mData[1], message.mData[2], message.mData[3], message.mData[4], message.mData[5], message.mData[6], message.mData[7]);*/
-                    QString dir = CAN_MSG_DIR(message2.mFlags) == 0 ? "\tRx" : "\tTx";
+                case BL_OBJ_TYPE_CAN_MESSAGE:
+                {
+                    message2.mHeader.mBase = base;
+                    bSuccess = BLReadObjectSecure(hFile, &message2.mHeader.mBase, sizeof(message2));
+                    /* free memory for the CAN message */
+                    if (!message2.mDLC)
+                        continue;
+                    if (bSuccess) {
+                        UINT64 id;
+                        //CANoe的人在扩展帧ID上加了0x80000000的，所以要处理一下
+                        if (message2.mID > 0x80000000)
+                            id = message2.mID & 0x7FFFFFFF;
+                        else
+                            id = message2.mID;
+                        /*printf("%ld 0x%x %2x %2x %2x %2x %2x %2x %2x %2x\n", message.mHeader.mObjectTimeStamp, (message.mID - 0x7FFFFFFF), message.mData[0],
+                            message.mData[1], message.mData[2], message.mData[3], message.mData[4], message.mData[5], message.mData[6], message.mData[7]);*/
+                        QString dir = CAN_MSG_DIR(message2.mFlags) == 0 ? "\tRx" : "\tTx";
 
-                    QString str = QString("%1 %2  %3 %4 %5 %6 %7 %8 %9 %10 %11 %12 %13 %14 %15")
-                        .arg(QString::number(message2.mHeader.mObjectTimeStamp / 1000000000.0, 'f', 6))
-                        .arg(QString::number(message2.mChannel))
-                        .arg("0x" + QString::number(id, 16).toUpper())
-                        .arg(dir)
-                        .arg("d")
-                        .arg(QString::number(message2.mDLC))
-                        .arg(QString::number(message2.mData[0], 16).toUpper(), 2, QLatin1Char('0'))
-                        .arg(QString::number(message2.mData[1], 16).toUpper(), 2, QLatin1Char('0'))
-                        .arg(QString::number(message2.mData[2], 16).toUpper(), 2, QLatin1Char('0'))
-                        .arg(QString::number(message2.mData[3], 16).toUpper(), 2, QLatin1Char('0'))
-                        .arg(QString::number(message2.mData[4], 16).toUpper(), 2, QLatin1Char('0'))
-                        .arg(QString::number(message2.mData[5], 16).toUpper(), 2, QLatin1Char('0'))
-                        .arg(QString::number(message2.mData[6], 16).toUpper(), 2, QLatin1Char('0'))
-                        .arg(QString::number(message2.mData[7], 16).toUpper(), 2, QLatin1Char('0'))
-                        /*.arg("Length = "+QString::number(message2.mFrameLength))
-                        .arg("BitCount = "+QString::number(message2.mBitCount))*/
-                        .arg("ID = " + QString::number(id) + "x") + "\n";
-                    if (isFilter)
-                    {
-                        if (fifter.size() > 0)
+                        QString str = QString("%1 %2  %3 %4 %5 %6 %7 %8 %9 %10 %11 %12 %13 %14 %15 %16 %17")
+                            .arg(QString::number(message2.mHeader.mObjectTimeStamp / 1000000000.0, 'f', 6))
+                            .arg(QString::number(message2.mChannel))
+                            .arg("0x" + QString::number(id, 16).toUpper())
+                            .arg(dir)
+                            .arg("d")
+                            .arg(QString::number(message2.mDLC))
+                            .arg(QString::number(message2.mData[0], 16).toUpper(), 2, QLatin1Char('0'))
+                            .arg(QString::number(message2.mData[1], 16).toUpper(), 2, QLatin1Char('0'))
+                            .arg(QString::number(message2.mData[2], 16).toUpper(), 2, QLatin1Char('0'))
+                            .arg(QString::number(message2.mData[3], 16).toUpper(), 2, QLatin1Char('0'))
+                            .arg(QString::number(message2.mData[4], 16).toUpper(), 2, QLatin1Char('0'))
+                            .arg(QString::number(message2.mData[5], 16).toUpper(), 2, QLatin1Char('0'))
+                            .arg(QString::number(message2.mData[6], 16).toUpper(), 2, QLatin1Char('0'))
+                            .arg(QString::number(message2.mData[7], 16).toUpper(), 2, QLatin1Char('0'))
+                            .arg("Length = "+QString::number(message2.mFrameLength))
+                            .arg("BitCount = "+QString::number(message2.mBitCount))
+                            .arg("ID = " + QString::number(id) + "x") + "\n";
+                        if (isFilter)
                         {
-                            for (int i = 0; i < fifter.size(); i++)
+                            if (fifter.size() > 0)
                             {
-                                if (QString::number(id, 16).toUpper() == fifter.at(i).toUpper())
+                                for (int i = 0; i < fifter.size(); i++)
                                 {
-                                    filestream << str;
+                                    if (QString::number(id, 16).toUpper() == fifter.at(i).toUpper())
+                                    {
+                                        filestream << str;
+                                    }
                                 }
                             }
                         }
+                        else
+                        {
+                            filestream << str;
+                        }
+
+                        BLFreeObject(hFile, &message2.mHeader.mBase);
                     }
-                    else
+                }
+                break;
+                case BL_OBJ_TYPE_CAN_STATISTIC:
+                    statistic.mHeader.mBase = base;
+                    bSuccess = BLReadObjectSecure(hFile, &statistic.mHeader.mBase, sizeof(statistic));
+                    if (bSuccess)
                     {
+                        QString str = QString("%1 %2  %3 %4 %5 %6 %7 %8 %9")
+                            .arg(QString::number(statistic.mHeader.mObjectTimeStamp / 1000000000.0, 'f', 6))
+                            .arg(QString::number(statistic.mChannel))
+                            .arg("Statistic: D " + QString::number(statistic.mStandardDataFrames))
+                            .arg("R " + QString::number(statistic.mStandardRemoteFrames))
+                            .arg("XD " + QString::number(statistic.mExtendedDataFrames))
+                            .arg("RD " + QString::number(statistic.mExtendedRemoteFrames))
+                            .arg("E " + QString::number(statistic.mErrorFrames))
+                            .arg("O " + QString::number(statistic.mOverloadFrames))
+                            .arg("B " + QString::number(statistic.mBusLoad/100.0, 'f', 2) + "%\n");
                         filestream << str;
                     }
-
-                    BLFreeObject(hFile, &message2.mHeader.mBase);
-                }
+                    BLFreeObject(hFile, &statistic.mHeader.mBase);
+                    break;
+                case BL_OBJ_TYPE_CAN_ERROR_EXT:
+                    errofreammessage.mHeader.mBase = base;
+                    bSuccess = BLReadObjectSecure(hFile, &errofreammessage.mHeader.mBase, sizeof(errofreammessage));
+                    if (bSuccess)
+                    {
+                        QString str = QString("%1 %2 %3 %4 Flags = 0x%5 CodeExt = 0x%6 Code = 0x%7 ID = 0x%8 Position = %9 Length = %10 Data = 0x%11 0x%12 0x%13 0x%14 0x%15 0x%16 0x%17 0x%18")
+                            .arg(QString::number(errofreammessage.mHeader.mObjectTimeStamp / 1000000000.0, 'f', 6))
+                            .arg(QString::number(errofreammessage.mChannel))
+                            .arg("ErrorFrame")
+                            .arg(QString::number(errofreammessage.mFlags,16)) //+ "\n";
+                            .arg(QString::number(errofreammessage.mFlagsExt, 16))
+                            .arg(QString::number(errofreammessage.mECC, 16))
+                            .arg(QString::number(errofreammessage.mID, 16))
+                            .arg(QString::number(errofreammessage.mDLC, 16))
+                            .arg(QString::number(errofreammessage.mPosition))
+                            .arg(QString::number(errofreammessage.mLength))
+                            .arg(QString::number(errofreammessage.mData[0], 16))
+                            .arg(QString::number(errofreammessage.mData[1], 16))
+                            .arg(QString::number(errofreammessage.mData[2], 16))
+                            .arg(QString::number(errofreammessage.mData[3], 16))
+                            .arg(QString::number(errofreammessage.mData[4], 16))
+                            .arg(QString::number(errofreammessage.mData[5], 16))
+                            .arg(QString::number(errofreammessage.mData[6], 16))
+                            .arg(QString::number(errofreammessage.mData[7], 16)) + "\n";
+                        filestream << str;
+                    }
+                    BLFreeObject(hFile, &errofreammessage.mHeader.mBase);
+                    break;
+                case BL_OBJ_TYPE_CAN_DRIVER_ERROR:
+                    erromessage.mHeader.mBase = base;
+                    bSuccess = BLReadObjectSecure(hFile, &erromessage.mHeader.mBase, sizeof(erromessage));
+                    if (bSuccess)
+                    {
+                        QString str = QString("%1 %2 %3 %4%5")
+                            .arg(QString::number(erromessage.mHeader.mObjectTimeStamp / 1000000000.0, 'f', 6))
+                            .arg("CAN")
+                            .arg(QString::number(erromessage.mChannel))
+                            .arg("Status:")
+                            .arg(DriverErrCode[erromessage.mErrorCode])+"\n";
+                        filestream << str;
+                    }
+                    BLFreeObject(hFile, &erromessage.mHeader.mBase);
+                    break;
+                default:
+                    /* skip all other objects */
+                    bSuccess = BLSkipObject(hFile, &base);
+                    break;
             }
             if (bSuccess)
             {
@@ -201,119 +302,7 @@ void KUSBLFTOASC::runConveter()
                 file.close();
                 return;
             }
-            continue;
-
-            switch (base.mObjectType)
-            {
-            case BL_OBJ_TYPE_CAN_MESSAGE:
-                /* read CAN message */
-                message2.mHeader.mBase = base;
-                bSuccess = BLReadObjectSecure(hFile, &message2.mHeader.mBase, sizeof(message2));
-                /* free memory for the CAN message */
-                if (bSuccess) {
-                    QString id = QString::number(message2.mID - 0x7FFFFFFF, 16);
-                    /*printf("%ld 0x%x %2x %2x %2x %2x %2x %2x %2x %2x\n", message.mHeader.mObjectTimeStamp, (message.mID - 0x7FFFFFFF), message.mData[0],
-                        message.mData[1], message.mData[2], message.mData[3], message.mData[4], message.mData[5], message.mData[6], message.mData[7]);*/
-                    QString dir = CAN_MSG_DIR(message2.mFlags) == 0 ? "\tRx" : "\tTx";
-                    
-                    QString str = QString("%1 %2  %3 %4 %5 %6 %7 %8 %9 %10 %11 %12 %13 %14 %15")
-                        .arg(QString::number(message2.mHeader.mObjectTimeStamp/1000000000.0,'f',6))
-                        .arg(QString::number(message2.mChannel))
-                        .arg("0x" + QString::number((message2.mID - 0x7FFFFFFF)-1, 16).toUpper())
-                        .arg(dir)
-                        .arg("d")
-                        .arg(QString::number(message2.mDLC))
-                        .arg(QString::number(message2.mData[0],16).toUpper(), 2, QLatin1Char('0'))
-                        .arg(QString::number(message2.mData[1], 16).toUpper(), 2, QLatin1Char('0'))
-                        .arg(QString::number(message2.mData[2], 16).toUpper(), 2, QLatin1Char('0'))
-                        .arg(QString::number(message2.mData[3], 16).toUpper(), 2, QLatin1Char('0'))
-                        .arg(QString::number(message2.mData[4], 16).toUpper(), 2, QLatin1Char('0'))
-                        .arg(QString::number(message2.mData[5], 16).toUpper(), 2, QLatin1Char('0'))
-                        .arg(QString::number(message2.mData[6], 16).toUpper(), 2, QLatin1Char('0'))
-                        .arg(QString::number(message2.mData[7], 16).toUpper(), 2, QLatin1Char('0'))
-                        /*.arg("Length = "+QString::number(message2.mFrameLength))
-                        .arg("BitCount = "+QString::number(message2.mBitCount))*/
-                        .arg("ID = "+QString::number(message2.mID - 0x7FFFFFFF-1)+"x") + "\n";
-                    if (isFilter)
-                    {
-                        if (fifter.size() > 0)
-                        {
-                            for (int i = 0; i < fifter.size(); i++)
-                            {
-                                if (id.toUpper() == fifter.at(i).toUpper())
-                                {
-                                    filestream << str;
-                                }
-                            }
-                        }
-                    }
-                    else
-                    {
-                        filestream << str;
-                    }
-                   
-                        BLFreeObject(hFile, &message2.mHeader.mBase);
-                }
-                break;
-            case BL_OBJ_TYPE_ENV_INTEGER:
-            case BL_OBJ_TYPE_ENV_DOUBLE:
-            case BL_OBJ_TYPE_ENV_STRING:
-            case BL_OBJ_TYPE_ENV_DATA:
-                /* read environment variable */
-                variable.mHeader.mBase = base;
-                bSuccess = BLReadObjectSecure(hFile, &variable.mHeader.mBase, sizeof(variable));
-                /* free memory for the environment variable */
-                if (bSuccess) {
-                    BLFreeObject(hFile, &variable.mHeader.mBase);
-                }
-                break;
-            case BL_OBJ_TYPE_ETHERNET_FRAME:
-                /* read ethernet frame */
-                ethframe.mHeader.mBase = base;
-                bSuccess = BLReadObjectSecure(hFile, &ethframe.mHeader.mBase, sizeof(ethframe));
-                /* free memory for the frame */
-                if (bSuccess) {
-                    BLFreeObject(hFile, &ethframe.mHeader.mBase);
-                }
-                break;
-            case BL_OBJ_TYPE_APP_TEXT:
-                /* read text */
-                appText.mHeader.mBase = base;
-                bSuccess = BLReadObjectSecure(hFile, &appText.mHeader.mBase, sizeof(appText));
-                if (NULL != appText.mText)
-                {
-                    printf("%s\n", appText.mText);
-                }
-                /* free memory for the text */
-                if (bSuccess) {
-                    BLFreeObject(hFile, &appText.mHeader.mBase);
-                }
-                break;
-            case BL_OBJ_TYPE_UNKNOWN:
-                break;
-            case BL_OBJ_TYPE_CAN_ERROR:
-            case BL_OBJ_TYPE_CAN_ERROR_EXT:
-                erromessage.mHeader.mBase = base;
-                break;
-            default:
-                /* skip all other objects */
-                bSuccess = BLSkipObject(hFile, &base);
-                break;
-            }
-
-            if (bSuccess)
-            {
-                *pRead += 1;
-            }
-            ++sta;
-            if(sta%100==0 || (sta/100)>= n)
-                emit sigStatus(++mn);
-            if (!RunState)
-            {
-                filestream.flush();
-                file.close();
-                return;
-            }
+            
         }
         filestream.flush();
         file.close();
