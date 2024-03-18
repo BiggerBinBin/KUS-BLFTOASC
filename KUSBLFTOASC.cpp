@@ -69,7 +69,7 @@ KUSBLFTOASC::KUSBLFTOASC(QWidget *parent)
         this->setStyleSheet(f.readAll());
     }
     this->setWindowIcon(QIcon(":/qrc/logo.ico"));
-    this->setWindowTitle("KUS BLF转ASC工具 V2.24.01.15");
+    this->setWindowTitle("KUS BLF转ASC工具 V2.24.03.18");
     //connect(this, &KUSBLFTOASC::sigStatus, this, &KUSBLFTOASC::on_recConveterState);
 }
 
@@ -107,6 +107,7 @@ void KUSBLFTOASC::runConveter()
         VBLEnvironmentVariable variable;
         VBLEthernetFrame ethframe;
         VBLAppText appText;
+        VBLSystemVariable sysVarable;
         VBLFileStatisticsEx statistics = { sizeof(statistics) };
         BOOL bSuccess;
 
@@ -165,6 +166,7 @@ void KUSBLFTOASC::runConveter()
             switch (base.mObjectType)
             {
                 case BL_OBJ_TYPE_CAN_MESSAGE:
+                case BL_OBJ_TYPE_CAN_MESSAGE2:
                 {
                     message2.mHeader.mBase = base;
                     bSuccess = BLReadObjectSecure(hFile, &message2.mHeader.mBase, sizeof(message2));
@@ -182,10 +184,10 @@ void KUSBLFTOASC::runConveter()
                             message.mData[1], message.mData[2], message.mData[3], message.mData[4], message.mData[5], message.mData[6], message.mData[7]);*/
                         QString dir = CAN_MSG_DIR(message2.mFlags) == 0 ? "\tRx" : "\tTx";
 
-                        QString str = QString("%1 %2  %3 %4 %5 %6 %7 %8 %9 %10 %11 %12 %13 %14 %15 %16 %17")
+                        QString str = QString("%1 %2 %3 %4 %5 %6 %7 %8 %9 %10 %11 %12 %13 %14 %15 %16 %17")
                             .arg(QString::number(message2.mHeader.mObjectTimeStamp / 1000000000.0, 'f', 6))
                             .arg(QString::number(message2.mChannel))
-                            .arg("0x" + QString::number(id, 16).toUpper())
+                            .arg(QString::number(id, 16).toUpper()+"x", -8, ' ')
                             .arg(dir)
                             .arg("d")
                             .arg(QString::number(message2.mDLC))
@@ -197,9 +199,9 @@ void KUSBLFTOASC::runConveter()
                             .arg(QString::number(message2.mData[5], 16).toUpper(), 2, QLatin1Char('0'))
                             .arg(QString::number(message2.mData[6], 16).toUpper(), 2, QLatin1Char('0'))
                             .arg(QString::number(message2.mData[7], 16).toUpper(), 2, QLatin1Char('0'))
-                            .arg("Length = "+QString::number(message2.mFrameLength))
+                            .arg(" Length = "+QString::number(message2.mFrameLength))
                             .arg("BitCount = "+QString::number(message2.mBitCount))
-                            .arg("ID = " + QString::number(id) + "x") + "\n";
+                            .arg("ID = " + QString::number(id) + (id>0x7ff?"x":"")) + "\n";
                         if (isFilter)
                         {
                             if (fifter.size() > 0)
@@ -283,6 +285,23 @@ void KUSBLFTOASC::runConveter()
                         filestream << str;
                     }
                     BLFreeObject(hFile, &erromessage.mHeader.mBase);
+                    break;
+                case BL_OBJ_TYPE_APP_TEXT:
+                    bSuccess = BLSkipObject(hFile, &base);
+                    break;
+                case BL_OBJ_TYPE_SYS_VARIABLE:
+                    sysVarable.mHeader.mBase = base;
+                    bSuccess = BLReadObjectSecure(hFile, &sysVarable.mHeader.mBase, sizeof(sysVarable));
+                    if (bSuccess)
+                    {
+                        
+                        QString str = QString("%1 %2 %3")
+                            .arg(QString::number(sysVarable.mHeader.mObjectTimeStamp / 1000000000.0, 'f', 6))
+                            .arg("SV: 3 0 1")
+                            .arg(sysVarable.mName)+"\n";
+                        filestream << str;
+                    }
+                    BLFreeObject(hFile, &sysVarable.mHeader.mBase);
                     break;
                 default:
                     /* skip all other objects */
